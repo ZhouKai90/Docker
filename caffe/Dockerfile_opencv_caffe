@@ -1,0 +1,96 @@
+FROM nvidia/cuda:10.0-cudnn7-devel-centos7
+#####################前期准备#######################
+ADD opencv-3.4.1.zip ./
+COPY ippicv_2017u3_lnx_intel64_general_20170822.tgz ./
+ADD caffe.tar.gz ./
+
+######################添加环境变量########################
+ENV LD_LIBRARY_PATH $/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+ENV PATH $/usr/local/cuda/bin:$PATH
+RUN source ~/.bashrc
+###################安装一些包################
+RUN yum -y install bind-utils epel-release initscripts nscd deltarpm \
+  gcc automake autoconf libtool make  ffmpeg ffmpeg-devel unzip zip \
+  cmake* gtk2-devel ant python-devel numpy pyhon-pip \
+  libdc1394-devel libv4l-devel gstreamer-plugins-base-devel
+  
+RUN yum -y install python-pip \
+    && pip install numpy==1.15.2 \
+    && pip install --upgrade pip \
+    && yum -y localinstall nogpgcheck https://download1.rpmfusion.org/free/el/rpmfusion-free-release-7.noarch.rpm \
+    && yum -y localinstall nogpgcheck https://download1.rpmfusion.org/nonfree/el/rpmfusion-nonfree-release-7.noarch.rpm \
+    && rpm -import http://li.nux.ro/download/nux/RPM-GPG-KEY-nux.ro \
+    && rpm -Uvh http://li.nux.ro/download/nux/dextop/el7/x86_64/nux-dextop-release-0-1.el7.nux.noarch.rpm
+
+########################编译opencv#############################
+
+RUN unzip opencv-3.4.1 \
+    && cd opencv-3.4.1 \
+    && rm ./3rdparty/ippicv/ippicv.cmake
+COPY ippicv.cmake ./opencv-3.4.1/3rdparty/ippicv/ippicv.cmake
+
+RUN mkdir ./opencv-3.4.1/build \
+    && ls \
+    && cd opencv-3.4.1/build \
+    && cmake \
+     -D CMAKE_BUILD_TYPE=Release -D BUILD_SHARED_LIBS=ON \
+     -D CMAKE_INSTALL_PREFIX=/usr/local \
+     -D WITH_CUDA=ON -D CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" -D CUDA_ARCH_PTX="${CUDA_ARCH_PTX}" \
+     -D CUDA_GENERATION=Auto \
+     -D WITH_JPEG=ON -D BUILD_JPEG=ON \
+     -D WITH_PNG=ON -D BUILD_PNG=ON \
+     -D WITH_CUFFT=ON \
+     -D BUILD_TESTS=OFF -D BUILD_EXAMPLES=OFF \
+     -D WITH_FFMPEG=ON \
+     -D WITH_GTK=ON\
+     -D WITH_OPENCL=ON \
+     -D WITH_QT=OFF \
+     -D WITH_V4L=OFF \
+     -D WITH_JASPER=ON \
+     -D WITH_1394=OFF \
+     -D WITH_TIFF=ON \
+     -D WITH_TBB=ON \
+     -D WITH_LIBV4L=ON \
+     -D WITH_OPENEXR=OFF \
+     -D WITH_IPP=OFF \
+     -D WITH_WEBP=ON \
+     -D BUILD_opencv_superres=OFF -D BUILD_opencv_java=OFF \
+     -D BUILD_opencv_videostab=OFF -D BUILD_opencv_apps=OFF -D BUILD_opencv_flann=ON \
+     -D BUILD_opencv_ml=ON -D BUILD_opencv_photo=OFF -D BUILD_opencv_shape=OFF \
+     -D BUILD_opencv_cudabgsegm=OFF -D BUILD_opencv_cudaimgproc=OFF -D BUILD_opencv_cudaoptflow=OFF -D BUILD_opencv_cudalegacy=OFF \
+     -D CUDA_NVCC_FLAGS="-O3" -D CUDA_FAST_MATH=ON \
+     -D BUILD_opencv_python2=ON \
+     -D BUILD_opencv_python3=OFF \
+     -D PYTHON_DEFAULT_EXECUTABLE=/usr/bin/python2 \
+     -D PYTHON2_NUMPY_INCLUDE_DIRS="/usr/lib64/python2.7/site-packages/numpy/core/include" .. \
+     && make -j12 \
+     && make install \
+     && /bin/bash -c 'echo "/usr/local/lib" > /etc/ld.so.conf.d/opencv.conf' \
+     && /bin/bash -c 'echo "/opencv-3.4.1/build/lib" >> /etc/ld.so.conf' \
+ENV PKG_CONFIG_PATH $/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+RUN source /etc/bashrc \
+     && cd opencv-3.4.1/build/lib \
+     && cp libopencv_imgcodecs.so  /usr/local/lib \
+     && cp libopencv_imgcodecs.so.3.4 /usr/local/lib \
+     && cp libopencv_imgcodecs.so.3.4.1 /usr/local/lib \
+     && ln -sf /usr/local/lib/libopencv_imgcodecs.so.3.4.1 /usr/local/lib/libopencv_imgcodecs.so.3.4 \
+     && ln -sf /usr/local/lib/libopencv_imgcodecs.so.3.4 /usr/local/lib/libopencv_imgcodecs.so \
+     && ldconfig
+
+
+#########################opencv配置结束#############################
+#编译caffe
+
+RUN yum -y install protobuf-devel leveldb-devel snappy-devel opencv-devel boost-devel hdf5-devel \
+  gflags-devel glog-devel lmdb-devel openblas-devel python-skimage
+  
+RUN pip install --upgrade setuptools protobuf \
+    && pip install scikit-image --upgrade
+RUN yum -y install liblas-devel atlas-devel
+COPY Makefile.config ./caffe-1.0
+RUN mv caffe-1.0 caffe \
+    && cd caffe \
+    && make all -j12 \
+    && make py -j12 \
+    && make test -j12
+#ENV LD_LIBRARY_PATH $/usr/local/lib:$LD_LIBRARY_PATH
